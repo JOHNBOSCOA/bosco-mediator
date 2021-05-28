@@ -4,11 +4,13 @@ import akka.actor.ActorSelection;
 import akka.actor.UntypedActor;
 import com.google.gson.Gson;
 import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpStatus;
 import org.json.JSONObject;
 import org.openhim.mediator.engine.MediatorConfig;
 import org.openhim.mediator.engine.messages.FinishRequest;
 import org.openhim.mediator.engine.messages.MediatorHTTPRequest;
+import org.openhim.mediator.engine.messages.MediatorHTTPResponse;
 
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -24,12 +26,28 @@ public class HfrHprs extends UntypedActor {
         if (msg instanceof MediatorHTTPRequest) {
 
             //Get request body
-             String bodyData = ((MediatorHTTPRequest) msg).getBody();
+            String bodyData = ((MediatorHTTPRequest) msg).getBody();
 
-             //Serialize the obtained string body
-             SourceMessage SourceMessage = new Gson().fromJson(bodyData, SourceMessage.class);
+            //Serialize the obtained string body
+            SourceMessage SourceMessage = new Gson().fromJson(bodyData, SourceMessage.class);
 
-             //Serialize object back to JSON
+            if(!StringUtils.isBlank(SourceMessage.getLatitude()) || !StringUtils.isBlank(SourceMessage.getLatitude())){
+                try{
+                    double latitude = Double.parseDouble(SourceMessage.getLatitude());
+                    double longitude = Double.parseDouble(SourceMessage.getLongitude());
+                }catch(Exception e){
+                    FinishRequest finishRequest = new FinishRequest(
+                            "Invalid latitude/longitude",
+                            "application/json",
+                            HttpStatus.SC_BAD_REQUEST);
+
+                    ((MediatorHTTPRequest) msg).getRequestHandler().tell(finishRequest,
+                            getSelf());
+                    return;
+                }
+
+            }
+            //Serialize object back to JSON
             String convertedMessage = new Gson().toJson(SourceMessage);
 
             HashMap<String, String> header = new HashMap<>();
@@ -46,7 +64,7 @@ public class HfrHprs extends UntypedActor {
             String authHeader = "Basic " + new String(encodedAuth);
             header.put("Authorization", authHeader);
 
-            String uri = connectionProperties.getString("scheme")+connectionProperties.getString("host")+":"+connectionProperties.getString("port")+connectionProperties.get("path");
+            String uri = connectionProperties.getString("scheme") + connectionProperties.getString("host") + ":" + connectionProperties.getString("port") + connectionProperties.get("path");
             MediatorHTTPRequest hprsRequest =
                     new MediatorHTTPRequest(((MediatorHTTPRequest) msg).getRequestHandler(), getSelf(),
                             "Sending message from mediator to HPRS", "POST", uri,
@@ -54,8 +72,8 @@ public class HfrHprs extends UntypedActor {
 
             ActorSelection httpConnector = getContext().actorSelection(config.userPathFor("http-connector"));
             httpConnector.tell(hprsRequest, getSelf());
-           FinishRequest finishRequest = new FinishRequest(convertedMessage, "application/json", HttpStatus.SC_OK);
-         ((MediatorHTTPRequest) msg).getRequestHandler().tell(finishRequest, getSelf());
+        }else if(msg instanceof MediatorHTTPResponse){
+            ((MediatorHTTPResponse) msg).getOriginalRequest().getRequestHandler().tell(((MediatorHTTPResponse) msg).toFinishRequest(), getSelf());
         } else {
             unhandled(msg);
         }
